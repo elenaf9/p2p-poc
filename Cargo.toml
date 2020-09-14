@@ -1,5 +1,5 @@
 [package]
-name = "libp2p-noise-chat"
+name = "libp2p-playground"
 version = "0.1.0"
 authors = ["Elena Frank <elena.frank@cgi.com>"]
 edition = "2018"

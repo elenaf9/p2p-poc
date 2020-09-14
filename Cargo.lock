@@ -1251,15 +1251,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libp2p-noise-chat"
-version = "0.1.0"
-dependencies = [
- "async-std",
- "futures",
- "libp2p",
-]
-
-[[package]]
 name = "libp2p-ping"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1290,6 +1281,15 @@ dependencies = [
  "rw-stream-sink",
  "unsigned-varint 0.4.0",
  "void",
+]
+
+[[package]]
+name = "libp2p-playground"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "futures",
+ "libp2p",
 ]
 
 [[package]]

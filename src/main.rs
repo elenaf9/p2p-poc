@@ -1,10 +1,8 @@
 use async_std::{io, task};
 use futures::{future, prelude::*};
 use libp2p::kad::record::store::MemoryStore;
-use libp2p::kad::{
-    record::Key, AddProviderOk, GetClosestPeersError, GetClosestPeersOk, Kademlia, KademliaEvent,
-    PeerRecord, PutRecordOk, QueryResult, Quorum, Record,
-};
+use libp2p::kad::{record::Key, GetClosestPeersOk, Kademlia, KademliaEvent, QueryResult};
+use libp2p::swarm::NetworkBehaviour;
 use libp2p::{
     core::upgrade,
     identity,
@@ -14,13 +12,10 @@ use libp2p::{
     tcp::TcpConfig,
     yamux, NetworkBehaviour, PeerId, Swarm, Transport,
 };
-use std::borrow::Borrow;
-use std::ops::Deref;
 use std::{
     error::Error,
     task::{Context, Poll},
 };
-use libp2p::swarm::NetworkBehaviour;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Create a random PeerId
@@ -62,22 +57,25 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Called when `kademlia` produces an event.
         fn inject_event(&mut self, message: KademliaEvent) {
             match message {
-                KademliaEvent::RoutingUpdated {
+                /* KademliaEvent::RoutingUpdated {
                     peer, addresses, ..
                 } => {
-                    // println!("peer: {:?}, added address: {:?} ", peer, addresses.into_vec().last().unwrap()),
-                }
+                    println!("peer: {:?}, added address: {:?} ", peer, addresses.into_vec().last().unwrap()),
+                }*/
                 KademliaEvent::QueryResult { result, .. } => match result {
-                    QueryResult::GetClosestPeers(Ok(GetClosestPeersOk { key, peers, })) => {
+                    QueryResult::GetClosestPeers(Ok(GetClosestPeersOk { key: _, peers })) => {
                         println!("closest peers: {:?}", peers);
                         for peer in peers {
                             let addresses = &self.mdns.addresses_of_peer(&peer);
                             let address = addresses.iter().last().unwrap();
-                            println!("I wanna say Hi to peer {:?} on address: {:?}", peer, address);
+                            println!(
+                                "I wanna say Hi to peer {:?} on address: {:?}",
+                                peer, address
+                            );
                         }
                     }
                     _ => {}
-                }
+                },
                 _ => {}
             }
         }
@@ -104,7 +102,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     task::block_on(future::poll_fn(move |cx: &mut Context<'_>| {
         loop {
             match stdin.try_poll_next_unpin(cx)? {
-                Poll::Ready(Some(line)) => handle_input_line(&mut swarm.kademlia, line, PeerId::from(local_keys.public())),
+                Poll::Ready(Some(line)) => {
+                    handle_input_line(&mut swarm.kademlia, line, PeerId::from(local_keys.public()))
+                }
                 Poll::Ready(None) => panic!("Stdin closed"),
                 Poll::Pending => break,
             }
@@ -139,7 +139,11 @@ fn handle_input_line(kademlia: &mut Kademlia<MemoryStore>, line: String, peer_id
             println!("Current Buckets:");
             for bucket in kademlia.kbuckets() {
                 for entry in bucket.iter() {
-                    println!("key: {:?}, values: {:?}", entry.node.key.preimage(), entry.node.value);
+                    println!(
+                        "key: {:?}, values: {:?}",
+                        entry.node.key.preimage(),
+                        entry.node.value
+                    );
                 }
             }
         }
