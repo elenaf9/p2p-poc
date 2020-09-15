@@ -66,10 +66,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     QueryResult::GetClosestPeers(Ok(GetClosestPeersOk { key: _, peers })) => {
                         println!("closest peers: {:?}", peers);
                         for peer in peers {
-                            let addresses = &self.mdns.addresses_of_peer(&peer);
-                            let address = addresses.iter().last().unwrap();
+                            let addr_vec = &self.mdns.addresses_of_peer(&peer);
+                            let address = addr_vec.iter().last().unwrap();
                             println!(
-                                "I wanna say Hi to peer {:?} on address: {:?}",
+                                "I wanna say Hi to peer {:?} o: {:?}, but I dont know how",
                                 peer, address
                             );
                         }
@@ -92,7 +92,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         Swarm::new(transport, behaviour, local_peer_id)
     };
 
-    // Read full lines from stdin
     let mut stdin = io::BufReader::new(io::stdin()).lines();
 
     // Tell the swarm to listen on all interfaces and a random, OS-assigned port.
@@ -111,7 +110,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         loop {
             match swarm.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => println!("{:?}", event),
+                Poll::Ready(Some(event)) => println!("Received sth: {:?}", event),
                 Poll::Ready(None) => return Poll::Ready(Ok(())),
                 Poll::Pending => {
                     if !listening {
@@ -148,7 +147,7 @@ fn handle_input_line(kademlia: &mut Kademlia<MemoryStore>, line: String, peer_id
             }
         }
         _ => {
-            println!("Options: LIST: lists current buckets in routing table, MSG: get closest peer")
+            println!("Options: LIST: lists current buckets in routing table, HI: get closest peer")
         }
     }
 }
