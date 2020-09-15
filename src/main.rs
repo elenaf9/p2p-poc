@@ -17,7 +17,6 @@ use std::{
     string::String,
     task::{Context, Poll},
 };
-use std::ops::Deref;
 
 // We create a custom network behaviour that combines Kademlia protocol and mDNS protocol.
 // mDNS enables detecting other peers in a local network
@@ -50,9 +49,9 @@ impl NetworkBehaviourEventProcess<KademliaEvent> for P2PNetworkBehaviour {
             }*/
             KademliaEvent::QueryResult { result, .. } => match result {
                 QueryResult::GetClosestPeers(Ok(GetClosestPeersOk { key, peers })) => {
-                    let target = peers.iter().find(|&p| {
-                        String::from_utf8(key.clone()).unwrap() == p.to_base58()
-                    });
+                    let target = peers
+                        .iter()
+                        .find(|&p| String::from_utf8(key.clone()).unwrap() == p.to_base58());
                     if target.is_some() {
                         let addr_vec = &self.mdns.addresses_of_peer(target.unwrap());
                         let address = addr_vec.iter().last().unwrap();
