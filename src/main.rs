@@ -54,7 +54,6 @@ impl NetworkBehaviourEventProcess<KademliaEvent> for P2PNetworkBehaviour {
                             "I wanna say Hi to peer {:?} o: {:?}, but I dont know how",
                             peer, address
                         );
-                        Swarm::dial_addr(&self, )
                     }
                 }
                 _ => {}
