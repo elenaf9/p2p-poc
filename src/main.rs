@@ -2,7 +2,7 @@ use async_std::{io, task};
 use futures::{future, prelude::*};
 use libp2p::kad::record::store::MemoryStore;
 use libp2p::kad::{record::Key, GetClosestPeersOk, Kademlia, KademliaEvent, QueryResult};
-use libp2p::swarm::NetworkBehaviour;
+use libp2p::swarm::{ExpandedSwarm, NetworkBehaviour};
 use libp2p::{
     core::upgrade,
     identity,
@@ -12,6 +12,7 @@ use libp2p::{
     tcp::TcpConfig,
     yamux, NetworkBehaviour, PeerId, Swarm, Transport,
 };
+use std::str::FromStr;
 use std::{
     error::Error,
     string::String,
@@ -106,7 +107,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         loop {
             // poll for user input in stdin
             match stdin.try_poll_next_unpin(cx)? {
-                Poll::Ready(Some(line)) => handle_input_line(&mut swarm.kademlia, line),
+                Poll::Ready(Some(peer_id)) => {
+                    let target = &PeerId::from_str(&peer_id);
+                    if target.is_ok() {
+                        Swarm::dial(&mut swarm, &PeerId::from_str(&peer_id).unwrap())?;
+                        println!("dialed peer {:?}", target.clone().as_ref().unwrap());
+                    } else {
+                        println!("PeerId faulty");
+                    }
+                    // handle_input_line(&mut swarm.kademlia, line)
+                }
                 Poll::Ready(None) => panic!("Stdin closed"),
                 Poll::Pending => break,
             }
@@ -115,7 +125,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             // poll for incoming events from the swarm
             match swarm.poll_next_unpin(cx) {
                 Poll::Ready(Some(event)) => println!("Received sth: {:?}", event),
-                Poll::Ready(None) => return Poll::Ready(Ok(())),
+                Poll::Ready(None) => {
+                    return Poll::Ready(Ok(()));
+                }
                 Poll::Pending => {
                     if !listening {
                         if let Some(a) = Swarm::listeners(&swarm).next() {
