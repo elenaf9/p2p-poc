@@ -2,22 +2,27 @@ use async_std::{io, task};
 use futures::{future, prelude::*};
 use libp2p::kad::record::store::MemoryStore;
 use libp2p::kad::{record::Key, GetClosestPeersOk, Kademlia, KademliaEvent, QueryResult};
-use libp2p::swarm::{ExpandedSwarm, NetworkBehaviour};
+use libp2p::swarm::{ExpandedSwarm, NetworkBehaviour, SwarmEvent};
+use libp2p::tcp::TcpConfig;
 use libp2p::{
-    core::upgrade,
+    core::{muxing, upgrade},
+    identify::{Identify, IdentifyEvent, IdentifyInfo},
     identity,
     mdns::{Mdns, MdnsEvent},
-    noise,
+    mplex::MplexConfig,
+    multiaddr::Multiaddr,
+    ping::{self, Ping, PingConfig, PingEvent, PingFailure, PingSuccess},
     swarm::NetworkBehaviourEventProcess,
-    tcp::TcpConfig,
-    yamux, NetworkBehaviour, PeerId, Swarm, Transport,
+    NetworkBehaviour, PeerId, Swarm, Transport,
 };
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{
     error::Error,
     string::String,
     task::{Context, Poll},
 };
+use std::borrow::Borrow;
 
 // We create a custom network behaviour that combines Kademlia protocol and mDNS protocol.
 // mDNS enables detecting other peers in a local network
@@ -26,6 +31,8 @@ use std::{
 struct P2PNetworkBehaviour {
     kademlia: Kademlia<MemoryStore>,
     mdns: Mdns,
+    ping: Ping,
+    identify: Identify,
 }
 
 impl NetworkBehaviourEventProcess<MdnsEvent> for P2PNetworkBehaviour {
@@ -68,32 +75,77 @@ impl NetworkBehaviourEventProcess<KademliaEvent> for P2PNetworkBehaviour {
     }
 }
 
+impl NetworkBehaviourEventProcess<PingEvent> for P2PNetworkBehaviour {
+    // Called when `ping` produces an event.
+    fn inject_event(&mut self, event: PingEvent) {
+        match event {
+            PingEvent {
+                peer,
+                result: Result::Ok(PingSuccess::Ping { rtt }),
+            } => {
+                println!(
+                    "ping: rtt to {} is {} ms",
+                    peer.to_base58(),
+                    rtt.as_millis()
+                );
+            }
+            PingEvent {
+                peer,
+                result: Result::Ok(PingSuccess::Pong),
+            } => {
+                println!("ping: pong from {}", peer.to_base58());
+            }
+            PingEvent {
+                peer,
+                result: Result::Err(PingFailure::Timeout),
+            } => {
+                println!("ping: timeout to {}", peer.to_base58());
+            }
+            PingEvent {
+                peer,
+                result: Result::Err(PingFailure::Other { error }),
+            } => {
+                println!("ping: failure with {}: {}", peer.to_base58(), error);
+            }
+        }
+    }
+}
+
+impl NetworkBehaviourEventProcess<IdentifyEvent> for P2PNetworkBehaviour {
+    // Called when `identify` produces an event.
+    fn inject_event(&mut self, event: IdentifyEvent) {
+        println!("identify: {:?}", event);
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     // Create a random PeerId
     let local_keys = identity::Keypair::generate_ed25519();
     let local_peer_id = PeerId::from(local_keys.public());
     println!("Local peer id: {:?}", local_peer_id);
-    // Create a noise key pair for authentication
-    let noise_keys = noise::Keypair::<noise::X25519Spec>::new()
-        .into_authentic(&local_keys)
-        .unwrap();
-    let noise = noise::NoiseConfig::xx(noise_keys).into_authenticated();
-    let yamux = yamux::Config::default();
 
-    // create a transport that negotiates the noise and yamux protocols on all connections.
-    let transport = TcpConfig::new()
-        .upgrade(upgrade::Version::V1)
-        .authenticate(noise)
-        .multiplex(yamux);
+    // create a transport
+    let transport = libp2p::build_development_transport(local_keys)?;
 
     // Create a Swarm that establishes connections through the given transport
-    // Use custom behaviour 2PNetworkBehaviour
+    // Use custom behaviour P2PNetworkBehaviour
     let mut swarm = {
         // Create a Kademlia behaviour.
         let store = MemoryStore::new(local_peer_id.clone());
         let kademlia = Kademlia::new(local_peer_id.clone(), store);
         let mdns = Mdns::new()?;
-        let behaviour = P2PNetworkBehaviour { kademlia, mdns };
+        let ping = Ping::new(PingConfig::new());
+        let identify = Identify::new(
+            "/ipfs/0.1.0".into(),
+            "rust-ipfs-example".into(),
+            identity::Keypair::generate_ed25519().public(),
+        );
+        let behaviour = P2PNetworkBehaviour {
+            kademlia,
+            mdns,
+            ping,
+            identify,
+        };
         Swarm::new(transport, behaviour, local_peer_id)
     };
 
@@ -108,10 +160,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             // poll for user input in stdin
             match stdin.try_poll_next_unpin(cx)? {
                 Poll::Ready(Some(peer_id)) => {
-                    let target = &PeerId::from_str(&peer_id);
-                    if target.is_ok() {
-                        Swarm::dial(&mut swarm, &PeerId::from_str(&peer_id).unwrap())?;
-                        println!("dialed peer {:?}", target.clone().as_ref().unwrap());
+                    if PeerId::from_str(&peer_id).is_ok() {
+                        let target = &PeerId::from_str(&peer_id)?;
+                        let dial = Swarm::dial(&mut swarm, target);
+                        if dial.is_ok() {
+                            println!(
+                                "dialed peer {:?}, connections: {:?}",
+                                target,
+                                Swarm::network_info(&swarm).num_connections
+                            );
+                            if let Some(_) = Swarm::connection_info(&mut swarm, target) {
+                                println!("Connected!");
+                            } else {
+                                println!("Why is this not working? ._.");
+                            }
+                        } else {
+                            println!("Err dialing target peer {:?}", dial.err());
+                        }
                     } else {
                         println!("PeerId faulty");
                     }
@@ -122,7 +187,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         loop {
-            // poll for incoming events from the swarm
             match swarm.poll_next_unpin(cx) {
                 Poll::Ready(Some(event)) => println!("Received sth: {:?}", event),
                 Poll::Ready(None) => {
@@ -136,12 +200,28 @@ fn main() -> Result<(), Box<dyn Error>> {
                             listening = true;
                         }
                     }
+                    println!(
+                        "connections: {:?}",
+                        Swarm::network_info(&swarm).num_connections
+                    );
                     break;
                 }
             }
         }
         Poll::Pending
     }))
+}
+
+async fn send_msg(address: &Multiaddr) {
+    let temp_transport = TcpConfig::new()
+        .and_then(move |c, e| upgrade::apply(c, MplexConfig::new(), e, upgrade::Version::V1));
+    let client = temp_transport.dial(address.clone()).unwrap().await.unwrap();
+    let mut outbound = muxing::outbound_from_ref_and_wrap(Arc::new(client))
+        .await
+        .unwrap();
+    println!("asdasd");
+    outbound.write_all(b"hello world").await.unwrap();
+    outbound.close().await.unwrap()
 }
 
 fn handle_input_line(kademlia: &mut Kademlia<MemoryStore>, line: String) {
