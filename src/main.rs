@@ -3,7 +3,7 @@ use async_std::{io, task};
 use futures::{future, prelude::*};
 use libp2p::{
     identity,
-    kad::{record::store::MemoryStore, GetClosestPeersOk, Kademlia, KademliaEvent, QueryResult},
+    kad::{record::store::MemoryStore, Kademlia, KademliaEvent},
     mdns::{Mdns, MdnsEvent},
     request_response::{
         ProtocolSupport, RequestResponse, RequestResponseConfig, RequestResponseEvent,
@@ -29,6 +29,8 @@ mod command_protocol;
 // We create a custom network behaviour that combines Kademlia protocol and mDNS protocol.
 // mDNS enables detecting other peers in a local network
 // Kademlia is a DTH to identify other nodes and exchange information
+// RequestResponse Protocol with generic Request / Responde messages for custom behaviour
+
 #[derive(NetworkBehaviour)]
 struct P2PNetworkBehaviour {
     kademlia: Kademlia<MemoryStore>,
@@ -50,36 +52,13 @@ impl NetworkBehaviourEventProcess<MdnsEvent> for P2PNetworkBehaviour {
 impl NetworkBehaviourEventProcess<KademliaEvent> for P2PNetworkBehaviour {
     // Called when `kademlia` produces an event.
     fn inject_event(&mut self, message: KademliaEvent) {
-        match message {
-            /* KademliaEvent::RoutingUpdated {
-                peer, addresses, ..
-            } => {
-                println!("peer: {:?}, added address: {:?} ", peer, addresses.into_vec().last().unwrap()),
-            }*/
-            KademliaEvent::QueryResult { result, .. } => match result {
-                QueryResult::GetClosestPeers(Ok(GetClosestPeersOk { key, peers })) => {
-                    let target = peers
-                        .iter()
-                        .find(|&p| String::from_utf8(key.clone()).unwrap() == p.to_base58());
-                    if target.is_some() {
-                        let addr_vec = &self.mdns.addresses_of_peer(target.unwrap());
-                        let address = addr_vec.iter().last().unwrap();
-                        println!("Found Target on address {:?}", address);
-                    } else {
-                        println!("Not found; TODO: implement recursive search for target");
-                    }
-                }
-                _ => {}
-            },
-            _ => {}
-        }
     }
 }
 
 impl NetworkBehaviourEventProcess<RequestResponseEvent<CommandRequest, CommandResponse>>
     for P2PNetworkBehaviour
 {
-    // Called when `ping` produces an event.
+    // Called when the command_protocol produces an event.
     fn inject_event(&mut self, event: RequestResponseEvent<CommandRequest, CommandResponse>) {
         match event {
             RequestResponseEvent::Message { peer: _, message } => match message {
@@ -93,23 +72,32 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent<CommandRequest, CommandRe
                         self.msg_proto.send_response(channel, CommandResponse::Pong);
                     }
                     CommandRequest::Other { cmd, args } => {
-                        println!("Received command: {:?} {:?}, we will Send a 'success' back", cmd, args);
-                        self.msg_proto.send_response(channel, CommandResponse::Other(String::from("Success").into_bytes()))
+                        println!(
+                            "Received command: {:?}, we will Send a 'success' back",
+                            cmd
+                        );
+                        // TODO: react to received command
+                        self.msg_proto.send_response(
+                            channel,
+                            CommandResponse::Other(String::from("Success").into_bytes()),
+                        )
                     }
                 },
                 RequestResponseMessage::Response {
                     request_id,
                     response,
-                } => {
-                    match response {
-                        CommandResponse::Pong => {
-                            println!("Received Pong for request {:?}", request_id);
-                        }
-                        CommandResponse::Other(result) => {
-                            println!("Received Result for request {:?}: {:?}", request_id, String::from_utf8(result));
-                        }
+                } => match response {
+                    CommandResponse::Pong => {
+                        println!("Received Pong for request {:?}", request_id);
                     }
-                }
+                    CommandResponse::Other(result) => {
+                        println!(
+                            "Received Result for request {:?}: {:?}",
+                            request_id,
+                            String::from_utf8(result)
+                        );
+                    }
+                },
             },
             RequestResponseEvent::OutboundFailure {
                 peer,
@@ -147,6 +135,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let store = MemoryStore::new(local_peer_id.clone());
         let kademlia = Kademlia::new(local_peer_id.clone(), store);
         let mdns = Mdns::new()?;
+        // set request_timeout and connection_keep_alive if necessary
         let cfg = RequestResponseConfig::default();
         let protocols = iter::once((CommandProtocol(), ProtocolSupport::Full));
         let msg_proto = RequestResponse::new(CommandCodec(), protocols.clone(), cfg);
