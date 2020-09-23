@@ -9,7 +9,7 @@ use libp2p::{
         ProtocolSupport, RequestResponse, RequestResponseConfig, RequestResponseEvent,
         RequestResponseMessage,
     },
-    swarm::{NetworkBehaviour, NetworkBehaviourEventProcess},
+    swarm::NetworkBehaviourEventProcess,
     NetworkBehaviour, PeerId, Swarm,
 };
 use std::{
@@ -51,8 +51,7 @@ impl NetworkBehaviourEventProcess<MdnsEvent> for P2PNetworkBehaviour {
 
 impl NetworkBehaviourEventProcess<KademliaEvent> for P2PNetworkBehaviour {
     // Called when `kademlia` produces an event.
-    fn inject_event(&mut self, message: KademliaEvent) {
-    }
+    fn inject_event(&mut self, _message: KademliaEvent) {}
 }
 
 impl NetworkBehaviourEventProcess<RequestResponseEvent<CommandRequest, CommandResponse>>
@@ -71,10 +70,10 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent<CommandRequest, CommandRe
                         println!("Received Ping, we will send a Pong back");
                         self.msg_proto.send_response(channel, CommandResponse::Pong);
                     }
-                    CommandRequest::Other { cmd, args } => {
+                    CommandRequest::Other(cmd) => {
                         println!(
                             "Received command: {:?}, we will Send a 'success' back",
-                            cmd
+                            String::from_utf8(cmd)
                         );
                         // TODO: react to received command
                         self.msg_proto.send_response(
@@ -185,11 +184,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                                             }
                                         }
                                     };
-                                    let other = CommandRequest::Other {
-                                        cmd: String::from(cmd),
-                                        args: vec![args.collect()],
-                                    };
-                                    println!("Sending command '{:?}' to peer: {:?}", cmd, peer);
+                                    let other = CommandRequest::Other(cmd.as_bytes().to_vec());
+                                    println!("Sending command {:?} to peer: {:?}", cmd, peer);
                                     swarm.msg_proto.send_request(&peer, other);
                                 } else {
                                     println!("Faulty target peer id");
@@ -229,7 +225,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             println!("Listening on {:?}", a);
                             println!("Type LIST to view current bucket entries");
                             println!("Type PING <peer_id> to ping another peer");
-                            println!("Type CMD <peer_id> <message> to send a command(message to another peer");
+                            println!("Type CMD <peer_id> <message> to send a command / message to another peer");
                             listening = true;
                         }
                     }

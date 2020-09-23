@@ -4,12 +4,12 @@ package dht.pb;
 message Message {
 	enum MessageType {
 		PING = 0;
-		OTHER = 2;
+		OTHER = 1;
 	}
 
 	MessageType type = 1;
 
-	repeated bytes args = 2;
+	bytes cmd = 2;
 
 	bytes result = 3;
 

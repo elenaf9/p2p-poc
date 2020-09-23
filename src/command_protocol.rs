@@ -19,7 +19,7 @@ pub struct CommandCodec();
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandRequest {
     Ping,
-    Other { cmd: String, args: Vec<String> },
+    Other(Vec<u8>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,14 +119,8 @@ fn proto_msg_to_req(msg: proto::Message) -> Result<CommandRequest, io::Error> {
     match msg_type {
         proto::message::MessageType::Ping => Ok(CommandRequest::Ping),
         proto::message::MessageType::Other => {
-            let mut args = Vec::with_capacity(msg.args.len());
-            for arg in msg.args.clone().into_iter() {
-                args.push(bytes_to_string(arg).ok().unwrap());
-            }
-            Ok(CommandRequest::Other {
-                cmd: String::from(args.first().unwrap()),
-                args: args.as_slice()[1..].to_vec(),
-            })
+            let cmd = msg.cmd;
+            Ok(CommandRequest::Other(cmd))
         }
     }
 }
@@ -149,16 +143,11 @@ fn req_to_proto_msg(req: CommandRequest) -> proto::Message {
             r#type: proto::message::MessageType::Ping as i32,
             ..proto::Message::default()
         },
-        CommandRequest::Other { cmd, args: _ } => {
-            let mut all_args = Vec::new();
-            all_args.push(cmd.clone().into_bytes());
-            // all_args.copy_from_slice(args.into_iter().map(|a| a.into_bytes()).collect());
-            proto::Message {
-                r#type: proto::message::MessageType::Other as i32,
-                args: all_args.clone(),
-                ..proto::Message::default()
-            }
-        }
+        CommandRequest::Other(cmd) => proto::Message {
+            r#type: proto::message::MessageType::Other as i32,
+            cmd,
+            ..proto::Message::default()
+        },
     }
 }
 
@@ -174,10 +163,6 @@ fn res_to_proto_msg(res: CommandResponse) -> proto::Message {
             ..proto::Message::default()
         },
     }
-}
-
-fn bytes_to_string(bytes: Vec<u8>) -> Result<String, io::Error> {
-    String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Creates an `io::Error` with `io::ErrorKind::InvalidData`.
