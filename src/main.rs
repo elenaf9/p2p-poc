@@ -1,143 +1,68 @@
-use crate::command_protocol::{CommandCodec, CommandProtocol, CommandRequest, CommandResponse};
-use async_std::{io, task};
+use crate::command_protocol::{CommandCodec, CommandProtocol, CommandRequest};
+use crate::network_behaviour::P2PNetworkBehaviour;
+use async_std::{
+    io::{stdin, BufReader},
+    task,
+};
 use futures::{future, prelude::*};
 use libp2p::{
-    identity,
-    kad::{record::store::MemoryStore, Kademlia, KademliaEvent},
-    mdns::{Mdns, MdnsEvent},
-    request_response::{
-        ProtocolSupport, RequestResponse, RequestResponseConfig, RequestResponseEvent,
-        RequestResponseMessage,
-    },
-    swarm::NetworkBehaviourEventProcess,
-    NetworkBehaviour, PeerId, Swarm,
+    build_development_transport,
+    identity::Keypair,
+    kad::{record::store::MemoryStore, Kademlia},
+    mdns::Mdns,
+    request_response::{ProtocolSupport, RequestResponse, RequestResponseConfig},
+    swarm::{ExpandedSwarm, IntoProtocolsHandler, NetworkBehaviour, ProtocolsHandler},
+    PeerId, Swarm,
 };
 use std::{
     error::Error,
     iter,
+    str::FromStr,
+    str::SplitWhitespace,
     string::String,
     task::{Context, Poll},
 };
-
-use std::str::FromStr;
 
 mod dht_proto {
     include!(concat!(env!("OUT_DIR"), "/dht.pb.rs"));
 }
 mod command_protocol;
+mod network_behaviour;
 
-// We create a custom network behaviour that combines Kademlia protocol and mDNS protocol.
-// mDNS enables detecting other peers in a local network
-// Kademlia is a DTH to identify other nodes and exchange information
-// RequestResponse Protocol with generic Request / Responde messages for custom behaviour
-
-#[derive(NetworkBehaviour)]
-struct P2PNetworkBehaviour {
-    kademlia: Kademlia<MemoryStore>,
-    mdns: Mdns,
-    msg_proto: RequestResponse<CommandCodec>,
-}
-
-impl NetworkBehaviourEventProcess<MdnsEvent> for P2PNetworkBehaviour {
-    // Called when `mdns` produces an event.
-    fn inject_event(&mut self, event: MdnsEvent) {
-        if let MdnsEvent::Discovered(list) = event {
-            for (peer_id, multiaddr) in list {
-                self.kademlia.add_address(&peer_id, multiaddr);
-            }
-        }
-    }
-}
-
-impl NetworkBehaviourEventProcess<KademliaEvent> for P2PNetworkBehaviour {
-    // Called when `kademlia` produces an event.
-    fn inject_event(&mut self, _message: KademliaEvent) {}
-}
-
-impl NetworkBehaviourEventProcess<RequestResponseEvent<CommandRequest, CommandResponse>>
-    for P2PNetworkBehaviour
-{
-    // Called when the command_protocol produces an event.
-    fn inject_event(&mut self, event: RequestResponseEvent<CommandRequest, CommandResponse>) {
-        match event {
-            RequestResponseEvent::Message { peer: _, message } => match message {
-                RequestResponseMessage::Request {
-                    request_id: _,
-                    request,
-                    channel,
-                } => match request {
-                    CommandRequest::Ping => {
-                        println!("Received Ping, we will send a Pong back");
-                        self.msg_proto.send_response(channel, CommandResponse::Pong);
-                    }
-                    CommandRequest::Other(cmd) => {
-                        println!(
-                            "Received command: {:?}, we will Send a 'success' back",
-                            String::from_utf8(cmd)
-                        );
-                        // TODO: react to received command
-                        self.msg_proto.send_response(
-                            channel,
-                            CommandResponse::Other(String::from("Success").into_bytes()),
-                        )
-                    }
-                },
-                RequestResponseMessage::Response {
-                    request_id,
-                    response,
-                } => match response {
-                    CommandResponse::Pong => {
-                        println!("Received Pong for request {:?}", request_id);
-                    }
-                    CommandResponse::Other(result) => {
-                        println!(
-                            "Received Result for request {:?}: {:?}",
-                            request_id,
-                            String::from_utf8(result)
-                        );
-                    }
-                },
-            },
-            RequestResponseEvent::OutboundFailure {
-                peer,
-                request_id,
-                error,
-            } => println!(
-                "Outbound Failure for request {:?} to peer: {:?}: {:?}",
-                request_id, peer, error
-            ),
-            RequestResponseEvent::InboundFailure {
-                peer,
-                request_id,
-                error,
-            } => println!(
-                "Inbound Failure for request {:?} to peer: {:?}: {:?}",
-                request_id, peer, error
-            ),
-        }
-    }
-}
+type P2PNetworkSwarm = ExpandedSwarm<
+    P2PNetworkBehaviour,
+    <<<P2PNetworkBehaviour as NetworkBehaviour>::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent,
+    <<<P2PNetworkBehaviour as NetworkBehaviour>::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::OutEvent,
+    <P2PNetworkBehaviour as NetworkBehaviour>::ProtocolsHandler,
+    PeerId,
+>;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Create a random PeerId
-    let local_keys = identity::Keypair::generate_ed25519();
+    let local_keys = Keypair::generate_ed25519();
     let local_peer_id = PeerId::from(local_keys.public());
     println!("Local peer id: {:?}", local_peer_id);
 
     // create a transport
-    let transport = libp2p::build_development_transport(local_keys)?;
+    let transport = build_development_transport(local_keys)?;
 
-    // Create a Swarm that establishes connections through the given transport
-    // Use custom behaviour P2PNetworkBehaviour
-    let mut swarm = {
-        // Create a Kademlia behaviour.
+    // Create a Kademlia behaviour.
+    let kademlia = {
         let store = MemoryStore::new(local_peer_id.clone());
-        let kademlia = Kademlia::new(local_peer_id.clone(), store);
-        let mdns = Mdns::new()?;
+        Kademlia::new(local_peer_id.clone(), store)
+    };
+    let mdns = Mdns::new()?;
+
+    // Create RequestResponse behaviour with CommandProtocol
+    let msg_proto = {
         // set request_timeout and connection_keep_alive if necessary
         let cfg = RequestResponseConfig::default();
         let protocols = iter::once((CommandProtocol(), ProtocolSupport::Full));
-        let msg_proto = RequestResponse::new(CommandCodec(), protocols.clone(), cfg);
+        RequestResponse::new(CommandCodec(), protocols, cfg)
+    };
+    // Create a Swarm that establishes connections through the given transport
+    // Use custom behaviour P2PNetworkBehaviour
+    let mut swarm = {
         let behaviour = P2PNetworkBehaviour {
             kademlia,
             mdns,
@@ -146,69 +71,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         Swarm::new(transport, behaviour, local_peer_id)
     };
 
-    let mut stdin = io::BufReader::new(io::stdin()).lines();
-
     // Tell the swarm to listen on all interfaces and a random, OS-assigned port.
     Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/0".parse()?)?;
 
+    poll_input(swarm)
+}
+fn poll_input(mut swarm: P2PNetworkSwarm) -> Result<(), Box<dyn Error>> {
+    let mut stdin = BufReader::new(stdin()).lines();
     let mut listening = false;
     task::block_on(future::poll_fn(move |cx: &mut Context<'_>| {
         loop {
             // poll for user input in stdin
             match stdin.try_poll_next_unpin(cx)? {
-                Poll::Ready(Some(line)) => {
-                    let mut args = line.split_whitespace();
-                    match args.next() {
-                        Some("PING") => {
-                            if let Some(peer_id) = args.next() {
-                                if let Some(peer) = PeerId::from_str(peer_id).ok() {
-                                    let ping = CommandRequest::Ping;
-                                    println!("Sending Ping to peer {:?}", peer);
-                                    swarm.msg_proto.send_request(&peer, ping);
-                                } else {
-                                    println!("Faulty target peer id");
-                                }
-                            } else {
-                                println!("Expected target peer id");
-                            }
-                        }
-                        Some("CMD") => {
-                            if let Some(peer_id) = args.next() {
-                                if let Some(peer) = PeerId::from_str(peer_id).ok() {
-                                    let cmd = {
-                                        match args.next() {
-                                            Some(c) => c,
-                                            None => {
-                                                println!("Expected command");
-                                                ""
-                                            }
-                                        }
-                                    };
-                                    let other = CommandRequest::Other(cmd.as_bytes().to_vec());
-                                    println!("Sending command {:?} to peer: {:?}", cmd, peer);
-                                    swarm.msg_proto.send_request(&peer, other);
-                                } else {
-                                    println!("Faulty target peer id");
-                                }
-                            } else {
-                                println!("Expected target peer id");
-                            }
-                        }
-                        Some("LIST") => {
-                            println!("Current Buckets:");
-                            for bucket in swarm.kademlia.kbuckets() {
-                                for entry in bucket.iter() {
-                                    println!(
-                                        "key: {:?}, values: {:?}",
-                                        entry.node.key.preimage(),
-                                        entry.node.value
-                                    );
-                                }
-                            }
-                        }
-                        _ => println!("No valid command"),
-                    }
-                }
+                Poll::Ready(Some(line)) => handle_input_line(&mut swarm, line),
                 Poll::Ready(None) => panic!("Stdin closed"),
                 Poll::Pending => break,
             }
@@ -235,4 +110,62 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         Poll::Pending
     }))
+}
+
+fn handle_input_line(swarm: &mut P2PNetworkSwarm, line: String) {
+    let mut args = line.split_whitespace();
+    match args.next() {
+        Some("PING") => send_ping_to_peer(args, &mut swarm.msg_proto),
+        Some("CMD") => send_cmd_to_peer(args, &mut swarm.msg_proto),
+        Some("LIST") => {
+            println!("Current Buckets:");
+            for bucket in swarm.kademlia.kbuckets() {
+                for entry in bucket.iter() {
+                    println!(
+                        "key: {:?}, values: {:?}",
+                        entry.node.key.preimage(),
+                        entry.node.value
+                    );
+                }
+            }
+        }
+        _ => println!("No valid command"),
+    }
+}
+
+fn send_ping_to_peer(mut args: SplitWhitespace, msg_proto: &mut RequestResponse<CommandCodec>) {
+    if let Some(peer_id) = args.next() {
+        if let Ok(peer) = PeerId::from_str(peer_id) {
+            let ping = CommandRequest::Ping;
+            println!("Sending Ping to peer {:?}", peer);
+            msg_proto.send_request(&peer, ping);
+        } else {
+            println!("Faulty target peer id");
+        }
+    } else {
+        println!("Expected target peer id");
+    }
+}
+
+fn send_cmd_to_peer(mut args: SplitWhitespace, msg_proto: &mut RequestResponse<CommandCodec>) {
+    if let Some(peer_id) = args.next() {
+        if let Ok(peer) = PeerId::from_str(peer_id) {
+            let cmd = {
+                match args.next() {
+                    Some(c) => c,
+                    None => {
+                        println!("Expected command");
+                        ""
+                    }
+                }
+            };
+            let other = CommandRequest::Other(cmd.as_bytes().to_vec());
+            println!("Sending command {:?} to peer: {:?}", cmd, peer);
+            msg_proto.send_request(&peer, other);
+        } else {
+            println!("Faulty target peer id");
+        }
+    } else {
+        println!("Expected target peer id");
+    }
 }

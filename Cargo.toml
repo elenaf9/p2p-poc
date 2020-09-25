@@ -3,7 +3,7 @@ name = "iota-p2p-poc"
 version = "0.1.0"
 authors = ["Elena Frank <elena.frank@iota.org>"]
 edition = "2018"
-build = "src/build.rs"
+build = "build.rs"
 
 [dependencies]
 async-std = "1.6.2"
