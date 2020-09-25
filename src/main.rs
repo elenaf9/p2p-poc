@@ -37,6 +37,9 @@ type P2PNetworkSwarm = ExpandedSwarm<
     PeerId,
 >;
 
+#[cfg(not(feature = "server"))]
+const BOOTSTRAP_PEER_ADDR: &str = "/ip4/169.254.185.69/tcp/53378"; // TODO: configure server for this endpoint
+
 fn main() -> Result<(), Box<dyn Error>> {
     // Create a random PeerId
     let local_keys = Keypair::generate_ed25519();
@@ -71,8 +74,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         Swarm::new(transport, behaviour, local_peer_id)
     };
 
+
     // Tell the swarm to listen on all interfaces and a random, OS-assigned port.
     Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/0".parse()?)?;
+
+    #[cfg(not(feature = "server"))]
+    {
+        let remote = BOOTSTRAP_PEER_ADDR.parse()?;
+        if let Ok(()) = Swarm::dial_addr(&mut swarm, remote) {
+            println!("Dialed {:?}", BOOTSTRAP_PEER_ADDR);
+            if let Ok(query_id) = swarm.kademlia.bootstrap() {
+                println!("Successfully bootstrapped with query id {:?}", query_id);
+            } else {
+                println!("Error bootstrapping");
+            }
+        } else {
+            println!("Could not dial {:?}", BOOTSTRAP_PEER_ADDR);
+        }
+    }
 
     poll_input(swarm)
 }
