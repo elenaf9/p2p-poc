@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // set request_timeout and connection_keep_alive if necessary
         let cfg = RequestResponseConfig::default();
         let protocols = iter::once((CommandProtocol(), ProtocolSupport::Full));
-        RequestResponse::new(CommandCodec(), protocols.clone(), cfg)
+        RequestResponse::new(CommandCodec(), protocols, cfg)
     };
     // Create a Swarm that establishes connections through the given transport
     // Use custom behaviour P2PNetworkBehaviour
