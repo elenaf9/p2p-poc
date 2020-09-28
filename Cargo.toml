@@ -17,3 +17,6 @@ unsigned-varint = { version = "0.4", features = ["futures-codec"] }
 
 [build-dependencies]
 prost-build = "0.6.1"
+
+[features]
+server = []
