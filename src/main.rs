@@ -85,11 +85,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         let remote = BOOTSTRAP_PEER_ADDR.parse()?;
         if let Ok(()) = Swarm::dial_addr(&mut swarm, remote) {
             println!("Dialed {:?}", BOOTSTRAP_PEER_ADDR);
-            /* if let Ok(query_id) = swarm.kademlia.bootstrap() {
-                println!("Successfully bootstrapped with query id {:?}", query_id);
-            } else {
-                println!("Error bootstrapping");
-            }*/
+        /* if let Ok(query_id) = swarm.kademlia.bootstrap() {
+            println!("Successfully bootstrapped with query id {:?}", query_id);
+        } else {
+            println!("Error bootstrapping");
+        }*/
         } else {
             println!("Could not dial {:?}", BOOTSTRAP_PEER_ADDR);
         }
@@ -125,7 +125,8 @@ fn poll_input(mut swarm: P2PNetworkSwarm) -> Result<(), Box<dyn Error>> {
                             println!("Listening on {:?}", a);
                         }
                         listening = true;
-                        #[cfg(not(feature = "server"))] {
+                        #[cfg(not(feature = "server"))]
+                        {
                             println!("Type LIST to view current bucket entries");
                             println!("Type PING <peer_id> to ping another peer");
                             println!("Type CMD <peer_id> <message> to send a command / message to another peer");
