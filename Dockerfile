@@ -26,8 +26,10 @@ RUN cargo build --release --features server
 # final base
 FROM rust:latest
 
+WORKDIR /app
+
 # copy the build artifact from the build stage
 COPY --from=build /iota-p2p-poc/target/release/iota-p2p-poc .
 
 # command for starting the container
-ENTRYPOINT ["/iota-p2p-poc"]
+ENTRYPOINT ["/app/iota-p2p-poc"]
