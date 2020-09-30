@@ -1,10 +1,9 @@
-#[cfg(not(feature = "server"))]
-use crate::command_protocol::CommandRequest;
-use crate::command_protocol::{CommandCodec, CommandProtocol};
+use crate::command_protocol::{CommandCodec, CommandProtocol, CommandRequest};
 use crate::network_behaviour::P2PNetworkBehaviour;
-#[cfg(not(feature = "server"))]
-use async_std::io::{stdin, BufReader};
-use async_std::task;
+use async_std::{
+    io::{stdin, BufReader},
+    task,
+};
 use futures::{future, prelude::*};
 use libp2p::{
     build_development_transport,
@@ -18,12 +17,9 @@ use libp2p::{
 use std::{
     error::Error,
     iter,
-    task::{Context, Poll},
-};
-#[cfg(not(feature = "server"))]
-use std::{
     str::{FromStr, SplitWhitespace},
     string::String,
+    task::{Context, Poll},
 };
 
 mod dht_proto {
@@ -104,19 +100,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     poll_input(swarm)
 }
 fn poll_input(mut swarm: P2PNetworkSwarm) -> Result<(), Box<dyn Error>> {
-    #[cfg(not(feature = "server"))]
     let mut stdin = BufReader::new(stdin()).lines();
     let mut listening = false;
     task::block_on(future::poll_fn(move |cx: &mut Context<'_>| {
-        #[cfg(not(feature = "server"))]
-        {
-            loop {
-                // poll for user input in stdin
-                match stdin.try_poll_next_unpin(cx)? {
-                    Poll::Ready(Some(line)) => handle_input_line(&mut swarm, line),
-                    Poll::Ready(None) => panic!("Stdin closed"),
-                    Poll::Pending => break,
-                }
+        loop {
+            // poll for user input in stdin
+            match stdin.try_poll_next_unpin(cx)? {
+                Poll::Ready(Some(line)) => handle_input_line(&mut swarm, line),
+                Poll::Ready(None) => panic!("Stdin closed"),
+                Poll::Pending => break,
             }
         }
         loop {
@@ -131,12 +123,9 @@ fn poll_input(mut swarm: P2PNetworkSwarm) -> Result<(), Box<dyn Error>> {
                             println!("Listening on {:?}", a);
                         }
                         listening = true;
-                        #[cfg(not(feature = "server"))]
-                        {
-                            println!("Type LIST to view current bucket entries");
-                            println!("Type PING <peer_id> to ping another peer");
-                            println!("Type CMD <peer_id> <message> to send a command / message to another peer");
-                        }
+                        println!("Type LIST to view current bucket entries");
+                        println!("Type PING <peer_id> to ping another peer");
+                        println!("Type CMD <peer_id> <message> to send a command / message to another peer");
                     }
                     break;
                 }
@@ -146,7 +135,6 @@ fn poll_input(mut swarm: P2PNetworkSwarm) -> Result<(), Box<dyn Error>> {
     }))
 }
 
-#[cfg(not(feature = "server"))]
 fn handle_input_line(swarm: &mut P2PNetworkSwarm, line: String) {
     let mut args = line.split_whitespace();
     match args.next() {
@@ -168,7 +156,6 @@ fn handle_input_line(swarm: &mut P2PNetworkSwarm, line: String) {
     }
 }
 
-#[cfg(not(feature = "server"))]
 fn send_ping_to_peer(mut args: SplitWhitespace, msg_proto: &mut RequestResponse<CommandCodec>) {
     if let Some(peer_id) = args.next() {
         if let Ok(peer) = PeerId::from_str(peer_id) {
@@ -183,7 +170,6 @@ fn send_ping_to_peer(mut args: SplitWhitespace, msg_proto: &mut RequestResponse<
     }
 }
 
-#[cfg(not(feature = "server"))]
 fn send_cmd_to_peer(mut args: SplitWhitespace, msg_proto: &mut RequestResponse<CommandCodec>) {
     if let Some(peer_id) = args.next() {
         if let Ok(peer) = PeerId::from_str(peer_id) {

@@ -81,7 +81,6 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent<CommandRequest, CommandRe
     }
 }
 
-
 impl P2PNetworkBehaviour {
     fn handle_request_msg(
         &mut self,
