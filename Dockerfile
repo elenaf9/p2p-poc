@@ -6,7 +6,7 @@ RUN USER=root cargo new --bin iota-p2p-poc
 WORKDIR /iota-p2p-poc
 
 # copy over manifests
-COPY ./Cargo.lock ./Cargo.lock
+# COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
 COPY ./build.rs ./build.rs
 COPY ./src/dht.proto ./src/dht.proto
