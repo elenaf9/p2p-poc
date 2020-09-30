@@ -40,9 +40,6 @@ type P2PNetworkSwarm = ExpandedSwarm<
     PeerId,
 >;
 
-#[cfg(not(feature = "server"))]
-const BOOTSTRAP_PEER_ADDR: &str = "/ip4/172.17.0.2/tcp/43329"; // TODO: configure server for this endpoint
-
 fn main() -> Result<(), Box<dyn Error>> {
     // Create a random PeerId
     let local_keys = Keypair::generate_ed25519();
@@ -77,21 +74,30 @@ fn main() -> Result<(), Box<dyn Error>> {
         Swarm::new(transport, behaviour, local_peer_id)
     };
 
-    // Tell the swarm to listen on all interfaces and a random, OS-assigned port.
-    Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/0".parse()?)?;
+    let mut is_swarm_listening = false;
+    if let Some(i) = std::env::args().position(|arg| arg == "--port") {
+        if let Some(port) = std::env::args().nth(i + 1) {
+            let addr = format!("/ip4/0.0.0.0/tcp/{}", port).parse()?;
+            Swarm::listen_on(&mut swarm, addr)?;
+            is_swarm_listening = true;
+        }
+    }
 
-    #[cfg(not(feature = "server"))]
-    {
-        let remote = BOOTSTRAP_PEER_ADDR.parse()?;
-        if let Ok(()) = Swarm::dial_addr(&mut swarm, remote) {
-            println!("Dialed {:?}", BOOTSTRAP_PEER_ADDR);
-        /* if let Ok(query_id) = swarm.kademlia.bootstrap() {
-            println!("Successfully bootstrapped with query id {:?}", query_id);
-        } else {
-            println!("Error bootstrapping");
-        }*/
-        } else {
-            println!("Could not dial {:?}", BOOTSTRAP_PEER_ADDR);
+    if !is_swarm_listening {
+        #[cfg(not(feature = "server"))]
+        // Tell the swarm to listen on all interfaces and a random, OS-assigned port.
+        Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/0".parse()?)?;
+
+        #[cfg(feature = "server")]
+        Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/16384".parse()?)?;
+    }
+
+    if let Some(i) = std::env::args().position(|arg| arg == "--dial") {
+        // Dial peer at fixed addr to connect to p2p network
+        if let Some(addr) = std::env::args().nth(i + 1) {
+            let remote = addr.parse()?;
+            Swarm::dial_addr(&mut swarm, remote)?;
+            println!("Dialed {}", addr)
         }
     }
 

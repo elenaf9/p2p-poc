@@ -30,4 +30,4 @@ FROM rust:latest
 COPY --from=build /iota-p2p-poc/target/release/iota-p2p-poc .
 
 # command for starting the container
-ENTRYPOINT ["/app/iota-p2p-poc"]
+ENTRYPOINT ["/iota-p2p-poc"]
