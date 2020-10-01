@@ -7,6 +7,7 @@ use async_std::{
 use futures::{future, prelude::*};
 use libp2p::{
     build_development_transport,
+    core::Multiaddr,
     identity::Keypair,
     kad::{record::store::MemoryStore, Kademlia},
     mdns::Mdns,
@@ -88,17 +89,42 @@ fn main() -> Result<(), Box<dyn Error>> {
         Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/16384".parse()?)?;
     }
 
-    if let Some(i) = std::env::args().position(|arg| arg == "--dial") {
-        // Dial peer at fixed addr to connect to p2p network
-        if let Some(addr) = std::env::args().nth(i + 1) {
-            let remote = addr.parse()?;
-            Swarm::dial_addr(&mut swarm, remote)?;
-            println!("Dialed {}", addr)
-        }
-    }
+    attempt_dialing_remote(&mut swarm);
 
     poll_input(swarm)
 }
+
+fn attempt_dialing_remote(swarm: &mut P2PNetworkSwarm) {
+    if let Some(i) = std::env::args().position(|arg| arg == "--dial") {
+        // Dial peer at fixed addr to connect to p2p network
+        if let Some(addr) = std::env::args().nth(i + 1) {
+            if let Ok(remote) = Multiaddr::from_str(&*addr) {
+                if Swarm::dial_addr(swarm, remote.clone()).is_ok() {
+                    println!("Dialed {}", addr);
+                    if let Some(peer_id) = std::env::args().nth(i + 2) {
+                        if let Ok(peer) = PeerId::from_str(&*peer_id) {
+                            swarm.kademlia.add_address(&peer, remote);
+                            if swarm.kademlia.bootstrap().is_ok() {
+                                println!("Successful bootstrapping");
+                            } else {
+                                eprintln!("Could not bootstrap");
+                            }
+                        } else {
+                            eprintln!("Invalid Peer Id {}", peer_id);
+                        }
+                    }
+                } else {
+                    eprintln!("Could not dial {}", addr);
+                }
+            } else {
+                eprintln!("Invalid multiaddress {}", addr);
+            }
+        } else {
+            eprintln!("Missing multiaddress");
+        }
+    }
+}
+
 fn poll_input(mut swarm: P2PNetworkSwarm) -> Result<(), Box<dyn Error>> {
     let mut stdin = BufReader::new(stdin()).lines();
     let mut listening = false;
