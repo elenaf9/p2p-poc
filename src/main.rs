@@ -8,6 +8,7 @@ use futures::{future, prelude::*};
 use libp2p::{
     build_development_transport,
     core::Multiaddr,
+    identify::Identify,
     identity::Keypair,
     kad::{record::store::MemoryStore, Kademlia},
     mdns::Mdns,
@@ -44,7 +45,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Local peer id: {:?}", local_peer_id);
 
     // create a transport
-    let transport = build_development_transport(local_keys)?;
+    let transport = build_development_transport(local_keys.clone())?;
 
     // Create a Kademlia behaviour.
     let kademlia = {
@@ -52,6 +53,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         Kademlia::new(local_peer_id.clone(), store)
     };
     let mdns = Mdns::new()?;
+
+    let identify = Identify::new(
+        "/ipfs/0.1.0".into(),
+        "iota-p2p-identify".into(),
+        local_keys.public(),
+    );
 
     // Create RequestResponse behaviour with CommandProtocol
     let msg_proto = {
@@ -64,6 +71,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Use custom behaviour P2PNetworkBehaviour
     let mut swarm = {
         let behaviour = P2PNetworkBehaviour {
+            identify,
             kademlia,
             mdns,
             msg_proto,

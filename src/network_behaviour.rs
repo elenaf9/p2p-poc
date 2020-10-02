@@ -9,6 +9,7 @@ use crate::command_protocol::{
     CommandResponse::{self, Other as OtherRes, Pong},
 };
 use libp2p::{
+    identify::{Identify, IdentifyEvent},
     kad::{store::MemoryStore, Kademlia, KademliaEvent},
     mdns::{Mdns, MdnsEvent},
     request_response::{
@@ -23,9 +24,27 @@ use libp2p::{
 
 #[derive(NetworkBehaviour)]
 pub struct P2PNetworkBehaviour {
+    pub(crate) identify: Identify,
     pub(crate) kademlia: Kademlia<MemoryStore>,
     pub(crate) mdns: Mdns,
     pub(crate) msg_proto: RequestResponse<CommandCodec>,
+}
+
+impl NetworkBehaviourEventProcess<IdentifyEvent> for P2PNetworkBehaviour {
+    // Called when `identify` produces an event.
+    fn inject_event(&mut self, event: IdentifyEvent) {
+        if let IdentifyEvent::Received {
+            peer_id,
+            info: _,
+            observed_addr,
+        } = event
+        {
+            println!(
+                "Identify:\n{:?}\nObserves us at: {:?}",
+                peer_id, observed_addr
+            );
+        }
+    }
 }
 
 impl NetworkBehaviourEventProcess<MdnsEvent> for P2PNetworkBehaviour {
