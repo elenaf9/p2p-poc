@@ -3,14 +3,17 @@
 // Kademlia is a DTH to identify other nodes and exchange information
 // RequestResponse Protocol with generic Request / Responde messages for custom behaviour
 
-use crate::command_protocol::{
-    CommandCodec,
-    CommandRequest::{self, Other as OtherReq, Ping},
-    CommandResponse::{self, Other as OtherRes, Pong},
+use crate::mailbox_protocol::{
+    MailboxCodec,
+    MailboxRequest::{self, Ping, Publish as PubReq},
+    MailboxResponse::{self, Pong, Publish as PubRes},
+    MailboxResult,
 };
 use libp2p::{
-    identify::{Identify, IdentifyEvent},
-    kad::{store::MemoryStore, Kademlia, KademliaEvent},
+    kad::{
+        record::Key, store::MemoryStore, Kademlia, KademliaEvent, PeerRecord, QueryResult, Quorum,
+        Record,
+    },
     mdns::{Mdns, MdnsEvent},
     request_response::{
         RequestId, RequestResponse,
@@ -21,30 +24,13 @@ use libp2p::{
     swarm::NetworkBehaviourEventProcess,
     NetworkBehaviour,
 };
+use std::time::{Duration, Instant};
 
 #[derive(NetworkBehaviour)]
 pub struct P2PNetworkBehaviour {
-    pub(crate) identify: Identify,
     pub(crate) kademlia: Kademlia<MemoryStore>,
     pub(crate) mdns: Mdns,
-    pub(crate) msg_proto: RequestResponse<CommandCodec>,
-}
-
-impl NetworkBehaviourEventProcess<IdentifyEvent> for P2PNetworkBehaviour {
-    // Called when `identify` produces an event.
-    fn inject_event(&mut self, event: IdentifyEvent) {
-        if let IdentifyEvent::Received {
-            peer_id,
-            info: _,
-            observed_addr,
-        } = event
-        {
-            println!(
-                "Identify:\n{:?}\nObserves us at: {:?}",
-                peer_id, observed_addr
-            );
-        }
-    }
+    pub(crate) msg_proto: RequestResponse<MailboxCodec>,
 }
 
 impl NetworkBehaviourEventProcess<MdnsEvent> for P2PNetworkBehaviour {
@@ -60,14 +46,36 @@ impl NetworkBehaviourEventProcess<MdnsEvent> for P2PNetworkBehaviour {
 
 impl NetworkBehaviourEventProcess<KademliaEvent> for P2PNetworkBehaviour {
     // Called when `kademlia` produces an event.
-    fn inject_event(&mut self, _message: KademliaEvent) {}
+    fn inject_event(&mut self, message: KademliaEvent) {
+        if let KademliaEvent::QueryResult { result, .. } = message {
+            match result {
+                QueryResult::GetRecord(Ok(ok)) => {
+                    for PeerRecord {
+                        record: Record { key, value, .. },
+                        ..
+                    } in ok.records
+                    {
+                        println!(
+                            "Got record {:?} {:?}",
+                            std::str::from_utf8(key.as_ref()).unwrap(),
+                            std::str::from_utf8(&value).unwrap(),
+                        );
+                    }
+                }
+                QueryResult::GetRecord(Err(err)) => {
+                    eprintln!("Failed to get record: {:?}", err);
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
-impl NetworkBehaviourEventProcess<RequestResponseEvent<CommandRequest, CommandResponse>>
+impl NetworkBehaviourEventProcess<RequestResponseEvent<MailboxRequest, MailboxResponse>>
     for P2PNetworkBehaviour
 {
-    // Called when the command_protocol produces an event.
-    fn inject_event(&mut self, event: RequestResponseEvent<CommandRequest, CommandResponse>) {
+    // Called when the mailbox_protocol produces an event.
+    fn inject_event(&mut self, event: RequestResponseEvent<MailboxRequest, MailboxResponse>) {
         match event {
             Message { peer: _, message } => match message {
                 Request {
@@ -103,36 +111,46 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent<CommandRequest, CommandRe
 impl P2PNetworkBehaviour {
     fn handle_request_msg(
         &mut self,
-        request: CommandRequest,
-        channel: ResponseChannel<CommandResponse>,
+        request: MailboxRequest,
+        channel: ResponseChannel<MailboxResponse>,
     ) {
         match request {
             Ping => {
                 println!("Received Ping, we will send a Pong back");
                 self.msg_proto.send_response(channel, Pong);
             }
-            OtherReq(cmd) => {
+            PubReq(r) => {
                 println!(
-                    "Received command: {:?}, we will Send a 'success' back",
-                    String::from_utf8(cmd)
+                    "Received Request to publish for id: {:?} the value: {:?}",
+                    r.key, r.value
                 );
-                // TODO: react to received command
-                self.msg_proto
-                    .send_response(channel, OtherRes(String::from("Success").into_bytes()))
+                let record = Record {
+                    key: Key::new(&r.key),
+                    value: r.value.into_bytes(),
+                    publisher: None,
+                    expires: Some(Instant::now() + Duration::new(120, 0)),
+                };
+                let put_record = self.kademlia.put_record(record, Quorum::One);
+                if put_record.is_ok() {
+                    println!("Successfully stored record");
+                    self.msg_proto
+                        .send_response(channel, PubRes(MailboxResult::Success));
+                } else {
+                    println!("Error storing record: {:?}", put_record.err());
+                }
             }
         }
     }
 
-    fn handle_response_msg(&mut self, request_id: RequestId, response: CommandResponse) {
+    fn handle_response_msg(&mut self, request_id: RequestId, response: MailboxResponse) {
         match response {
             Pong => {
                 println!("Received Pong for request {:?}", request_id);
             }
-            OtherRes(result) => {
+            PubRes(result) => {
                 println!(
-                    "Received Result for request {:?}: {:?}",
-                    request_id,
-                    String::from_utf8(result)
+                    "Received Result for publish request {:?}: {:?}",
+                    request_id, result
                 );
             }
         }
