@@ -12,7 +12,7 @@ COPY ./build.rs ./build.rs
 COPY ./src/dht.proto ./src/dht.proto
 
 # cache dependencies
-RUN cargo build --release --features server
+RUN cargo build --release
 RUN rm src/*.rs
 
 # copy source tree
@@ -21,7 +21,7 @@ COPY ./src ./src
 RUN cargo clean
 
 # build for release
-RUN cargo build --release --features server
+RUN cargo build --release
 
 # final base
 FROM rust:latest

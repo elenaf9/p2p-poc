@@ -12,37 +12,49 @@ use prost::Message;
 use std::io;
 
 #[derive(Debug, Clone)]
-pub struct CommandProtocol();
+pub struct MailboxProtocol();
 #[derive(Clone)]
-pub struct CommandCodec();
+pub struct MailboxCodec();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CommandRequest {
+pub enum MailboxRequest {
     Ping,
-    Other(Vec<u8>),
+    Publish(MailboxRecord),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CommandResponse {
-    Pong,
-    Other(Vec<u8>),
+pub struct MailboxRecord {
+    pub(crate) key: String,
+    pub(crate) value: String,
 }
 
-impl ProtocolName for CommandProtocol {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MailboxResponse {
+    Pong,
+    Publish(MailboxResult),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MailboxResult {
+    Success,
+    Error,
+}
+
+impl ProtocolName for MailboxProtocol {
     fn protocol_name(&self) -> &[u8] {
-        b"/custom-retrieve/1.0.0"
+        b"/p2p-mailbox/1.0.0"
     }
 }
 
 #[async_trait]
-impl RequestResponseCodec for CommandCodec {
-    type Protocol = CommandProtocol;
-    type Request = CommandRequest;
-    type Response = CommandResponse;
+impl RequestResponseCodec for MailboxCodec {
+    type Protocol = MailboxProtocol;
+    type Request = MailboxRequest;
+    type Response = MailboxResponse;
 
     async fn read_request<T>(
         &mut self,
-        _: &CommandProtocol,
+        _: &MailboxProtocol,
         io: &mut T,
     ) -> io::Result<Self::Request>
     where
@@ -61,7 +73,7 @@ impl RequestResponseCodec for CommandCodec {
 
     async fn read_response<T>(
         &mut self,
-        _: &CommandProtocol,
+        _: &MailboxProtocol,
         io: &mut T,
     ) -> io::Result<Self::Response>
     where
@@ -80,9 +92,9 @@ impl RequestResponseCodec for CommandCodec {
 
     async fn write_request<T>(
         &mut self,
-        _: &CommandProtocol,
+        _: &MailboxProtocol,
         io: &mut T,
-        req: CommandRequest,
+        req: MailboxRequest,
     ) -> io::Result<()>
     where
         T: AsyncWrite + Unpin + Send,
@@ -97,9 +109,9 @@ impl RequestResponseCodec for CommandCodec {
 
     async fn write_response<T>(
         &mut self,
-        _: &CommandProtocol,
+        _: &MailboxProtocol,
         io: &mut T,
-        res: CommandResponse,
+        res: MailboxResponse,
     ) -> io::Result<()>
     where
         T: AsyncWrite + Unpin + Send,
@@ -113,55 +125,79 @@ impl RequestResponseCodec for CommandCodec {
     }
 }
 
-fn proto_msg_to_req(msg: proto::Message) -> Result<CommandRequest, io::Error> {
+fn proto_msg_to_req(msg: proto::Message) -> Result<MailboxRequest, io::Error> {
     let msg_type = proto::message::MessageType::from_i32(msg.r#type)
         .ok_or_else(|| invalid_data(format!("unknown message type: {}", msg.r#type)))?;
     match msg_type {
-        proto::message::MessageType::Ping => Ok(CommandRequest::Ping),
-        proto::message::MessageType::Other => {
-            let cmd = msg.cmd;
-            Ok(CommandRequest::Other(cmd))
+        proto::message::MessageType::Ping => Ok(MailboxRequest::Ping),
+        proto::message::MessageType::Publish => {
+            let proto_record = msg.record.unwrap_or_default();
+            let record = MailboxRecord {
+                key: String::from_utf8(proto_record.key)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                value: String::from_utf8(proto_record.value)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+            };
+            Ok(MailboxRequest::Publish(record))
         }
     }
 }
 
-fn proto_msg_to_res(msg: proto::Message) -> Result<CommandResponse, io::Error> {
+fn proto_msg_to_res(msg: proto::Message) -> Result<MailboxResponse, io::Error> {
     let msg_type = proto::message::MessageType::from_i32(msg.r#type)
         .ok_or_else(|| invalid_data(format!("unknown message type: {}", msg.r#type)))?;
     match msg_type {
-        proto::message::MessageType::Ping => Ok(CommandResponse::Pong),
-        proto::message::MessageType::Other => {
-            let result = msg.result;
-            Ok(CommandResponse::Other(result))
+        proto::message::MessageType::Ping => Ok(MailboxResponse::Pong),
+        proto::message::MessageType::Publish => {
+            match proto::message::Result::from_i32(msg.r#result)
+                .ok_or_else(|| invalid_data(format!("unknown message result: {}", msg.r#result)))?
+            {
+                proto::message::Result::Success => {
+                    Ok(MailboxResponse::Publish(MailboxResult::Success))
+                }
+                proto::message::Result::Error => Ok(MailboxResponse::Publish(MailboxResult::Error)),
+            }
         }
     }
 }
 
-fn req_to_proto_msg(req: CommandRequest) -> proto::Message {
+fn req_to_proto_msg(req: MailboxRequest) -> proto::Message {
     match req {
-        CommandRequest::Ping => proto::Message {
+        MailboxRequest::Ping => proto::Message {
             r#type: proto::message::MessageType::Ping as i32,
             ..proto::Message::default()
         },
-        CommandRequest::Other(cmd) => proto::Message {
-            r#type: proto::message::MessageType::Other as i32,
-            cmd,
-            ..proto::Message::default()
-        },
+        MailboxRequest::Publish(record) => {
+            let proto_record = proto::Record {
+                key: record.key.into_bytes(),
+                value: record.value.into_bytes(),
+            };
+            proto::Message {
+                r#type: proto::message::MessageType::Publish as i32,
+                record: Some(proto_record),
+                ..proto::Message::default()
+            }
+        }
     }
 }
 
-fn res_to_proto_msg(res: CommandResponse) -> proto::Message {
+fn res_to_proto_msg(res: MailboxResponse) -> proto::Message {
     match res {
-        CommandResponse::Pong => proto::Message {
+        MailboxResponse::Pong => proto::Message {
             r#type: proto::message::MessageType::Ping as i32,
             ..proto::Message::default()
         },
-        CommandResponse::Other(result) => proto::Message {
-            r#type: proto::message::MessageType::Other as i32,
-            result,
-            ..proto::Message::default()
-        },
+        MailboxResponse::Publish(r) => {
+            let result = match r {
+                MailboxResult::Success => proto::message::Result::Success,
+                MailboxResult::Error => proto::message::Result::Error,
+            };
+            proto::Message {
+                r#type: proto::message::MessageType::Publish as i32,
+                r#result: result as i32,
+                ..proto::Message::default()
+            }
+        }
     }
 }
 

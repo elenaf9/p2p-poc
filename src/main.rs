@@ -1,4 +1,4 @@
-use crate::command_protocol::{CommandCodec, CommandProtocol, CommandRequest};
+use crate::mailbox_protocol::{MailboxCodec, MailboxProtocol, MailboxRecord, MailboxRequest};
 use crate::network_behaviour::P2PNetworkBehaviour;
 use async_std::{
     io::{stdin, BufReader},
@@ -8,9 +8,8 @@ use futures::{future, prelude::*};
 use libp2p::{
     build_development_transport,
     core::Multiaddr,
-    identify::Identify,
     identity::Keypair,
-    kad::{record::store::MemoryStore, Kademlia},
+    kad::{record::store::MemoryStore, record::Key, Kademlia, Quorum},
     mdns::Mdns,
     request_response::{ProtocolSupport, RequestResponse, RequestResponseConfig},
     swarm::{ExpandedSwarm, IntoProtocolsHandler, NetworkBehaviour, ProtocolsHandler},
@@ -27,7 +26,7 @@ use std::{
 mod dht_proto {
     include!(concat!(env!("OUT_DIR"), "/dht.pb.rs"));
 }
-mod command_protocol;
+mod mailbox_protocol;
 mod network_behaviour;
 
 type P2PNetworkSwarm = ExpandedSwarm<
@@ -45,7 +44,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Local peer id: {:?}", local_peer_id);
 
     // create a transport
-    let transport = build_development_transport(local_keys.clone())?;
+    let transport = build_development_transport(local_keys)?;
 
     // Create a Kademlia behaviour.
     let kademlia = {
@@ -54,24 +53,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let mdns = Mdns::new()?;
 
-    let identify = Identify::new(
-        "/ipfs/0.1.0".into(),
-        "iota-p2p-identify".into(),
-        local_keys.public(),
-    );
-
-    // Create RequestResponse behaviour with CommandProtocol
+    // Create RequestResponse behaviour with MailboxProtocol
     let msg_proto = {
         // set request_timeout and connection_keep_alive if necessary
         let cfg = RequestResponseConfig::default();
-        let protocols = iter::once((CommandProtocol(), ProtocolSupport::Full));
-        RequestResponse::new(CommandCodec(), protocols, cfg)
+        let protocols = iter::once((MailboxProtocol(), ProtocolSupport::Full));
+        RequestResponse::new(MailboxCodec(), protocols, cfg)
     };
     // Create a Swarm that establishes connections through the given transport
     // Use custom behaviour P2PNetworkBehaviour
     let mut swarm = {
         let behaviour = P2PNetworkBehaviour {
-            identify,
             kademlia,
             mdns,
             msg_proto,
@@ -89,21 +81,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if !is_swarm_listening {
-        #[cfg(not(feature = "server"))]
-        // Tell the swarm to listen on all interfaces and a random, OS-assigned port.
-        Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/0".parse()?)?;
-
-        #[cfg(feature = "server")]
         Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/16384".parse()?)?;
     }
 
-    attempt_dialing_remote(&mut swarm);
+    let mailbox_peer = attempt_connect_mailbox(&mut swarm);
 
-    poll_input(swarm)
+    poll_input(swarm, mailbox_peer)
 }
 
-fn attempt_dialing_remote(swarm: &mut P2PNetworkSwarm) {
-    if let Some(i) = std::env::args().position(|arg| arg == "--dial") {
+fn attempt_connect_mailbox(swarm: &mut P2PNetworkSwarm) -> Result<PeerId, ()> {
+    if let Some(i) = std::env::args().position(|arg| arg == "--mailbox") {
         // Dial peer at fixed addr to connect to p2p network
         if let Some(addr) = std::env::args().nth(i + 1) {
             if let Ok(remote) = Multiaddr::from_str(&*addr) {
@@ -117,12 +104,11 @@ fn attempt_dialing_remote(swarm: &mut P2PNetworkSwarm) {
                             } else {
                                 eprintln!("Could not bootstrap");
                             }
+                            return Ok(peer);
                         } else {
                             eprintln!("Invalid Peer Id {}", peer_id);
                         }
                     }
-                } else {
-                    eprintln!("Could not dial {}", addr);
                 }
             } else {
                 eprintln!("Invalid multiaddress {}", addr);
@@ -131,16 +117,20 @@ fn attempt_dialing_remote(swarm: &mut P2PNetworkSwarm) {
             eprintln!("Missing multiaddress");
         }
     }
+    Err(())
 }
 
-fn poll_input(mut swarm: P2PNetworkSwarm) -> Result<(), Box<dyn Error>> {
+fn poll_input(
+    mut swarm: P2PNetworkSwarm,
+    mailbox_peer: Result<PeerId, ()>,
+) -> Result<(), Box<dyn Error>> {
     let mut stdin = BufReader::new(stdin()).lines();
     let mut listening = false;
     task::block_on(future::poll_fn(move |cx: &mut Context<'_>| {
         loop {
             // poll for user input in stdin
             match stdin.try_poll_next_unpin(cx)? {
-                Poll::Ready(Some(line)) => handle_input_line(&mut swarm, line),
+                Poll::Ready(Some(line)) => handle_input_line(&mut swarm, line, &mailbox_peer),
                 Poll::Ready(None) => panic!("Stdin closed"),
                 Poll::Pending => break,
             }
@@ -159,7 +149,12 @@ fn poll_input(mut swarm: P2PNetworkSwarm) -> Result<(), Box<dyn Error>> {
                         listening = true;
                         println!("Type LIST to view current bucket entries");
                         println!("Type PING <peer_id> to ping another peer");
-                        println!("Type CMD <peer_id> <message> to send a command / message to another peer");
+                        println!("Type GET <key> to fetch a record");
+                        if mailbox_peer.is_ok() {
+                            println!("Type PUT <key> <value> <peer_id:OPTIONAL> to let another peer publish a record, if no peer_id it will use the mailbox peer_id");
+                        } else {
+                            println!("Type PUT <key> <value> <peer_id> to let another peer publish a record");
+                        }
                     }
                     break;
                 }
@@ -169,11 +164,12 @@ fn poll_input(mut swarm: P2PNetworkSwarm) -> Result<(), Box<dyn Error>> {
     }))
 }
 
-fn handle_input_line(swarm: &mut P2PNetworkSwarm, line: String) {
+fn handle_input_line(swarm: &mut P2PNetworkSwarm, line: String, mailbox_peer: &Result<PeerId, ()>) {
     let mut args = line.split_whitespace();
     match args.next() {
         Some("PING") => send_ping_to_peer(args, &mut swarm.msg_proto),
-        Some("CMD") => send_cmd_to_peer(args, &mut swarm.msg_proto),
+        Some("GET") => fetch_record(args, &mut swarm.kademlia),
+        Some("PUT") => publish_record(args, &mut swarm.msg_proto, &mailbox_peer),
         Some("LIST") => {
             println!("Current Buckets:");
             for bucket in swarm.kademlia.kbuckets() {
@@ -190,10 +186,10 @@ fn handle_input_line(swarm: &mut P2PNetworkSwarm, line: String) {
     }
 }
 
-fn send_ping_to_peer(mut args: SplitWhitespace, msg_proto: &mut RequestResponse<CommandCodec>) {
+fn send_ping_to_peer(mut args: SplitWhitespace, msg_proto: &mut RequestResponse<MailboxCodec>) {
     if let Some(peer_id) = args.next() {
         if let Ok(peer) = PeerId::from_str(peer_id) {
-            let ping = CommandRequest::Ping;
+            let ping = MailboxRequest::Ping;
             println!("Sending Ping to peer {:?}", peer);
             msg_proto.send_request(&peer, ping);
         } else {
@@ -204,25 +200,53 @@ fn send_ping_to_peer(mut args: SplitWhitespace, msg_proto: &mut RequestResponse<
     }
 }
 
-fn send_cmd_to_peer(mut args: SplitWhitespace, msg_proto: &mut RequestResponse<CommandCodec>) {
-    if let Some(peer_id) = args.next() {
-        if let Ok(peer) = PeerId::from_str(peer_id) {
-            let cmd = {
-                match args.next() {
-                    Some(c) => c,
-                    None => {
-                        println!("Expected command");
-                        ""
-                    }
-                }
+fn publish_record(
+    mut args: SplitWhitespace,
+    msg_proto: &mut RequestResponse<MailboxCodec>,
+    mailbox_peer: &Result<PeerId, ()>,
+) {
+    if let Some(key) = args.next() {
+        if let Some(value) = args.next() {
+            let record = MailboxRecord {
+                key: String::from(key),
+                value: String::from(value),
             };
-            let other = CommandRequest::Other(cmd.as_bytes().to_vec());
-            println!("Sending command {:?} to peer: {:?}", cmd, peer);
-            msg_proto.send_request(&peer, other);
+            if let Some(peer_id) = args.next() {
+                if let Ok(peer) = PeerId::from_str(peer_id) {
+                    println!(
+                        "Sending publish request for record {:?}:{:?} to peer: {:?}",
+                        key, value, peer
+                    );
+                    msg_proto.send_request(&peer, MailboxRequest::Publish(record));
+                } else {
+                    println!("Faulty target peer id");
+                }
+            } else if let Ok(peer) = mailbox_peer {
+                println!(
+                    "Sending publish request for record {:?}:{:?} to peer: {:?}",
+                    key, value, peer
+                );
+                msg_proto.send_request(&peer, MailboxRequest::Publish(record));
+            } else {
+                println!("Missing target peer");
+            }
         } else {
-            println!("Faulty target peer id");
+            println!("Missing value");
         }
     } else {
-        println!("Expected target peer id");
+        println!("Missing key");
     }
+}
+
+fn fetch_record(mut args: SplitWhitespace, kademlia: &mut Kademlia<MemoryStore>) {
+    let key = {
+        match args.next() {
+            Some(key) => Key::new(&key),
+            None => {
+                eprintln!("Expected key");
+                return;
+            }
+        }
+    };
+    kademlia.get_record(&key, Quorum::One);
 }

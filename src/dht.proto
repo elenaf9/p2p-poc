@@ -1,17 +1,26 @@
 syntax = "proto3";
 package dht.pb;
 
+message Record {
+	bytes key = 1;
+	bytes value = 2;
+}
+
 message Message {
 	enum MessageType {
 		PING = 0;
-		OTHER = 1;
+		PUBLISH = 1;
+	}
+
+	enum Result {
+		SUCCESS = 0;
+		ERROR = 1;
 	}
 
 	MessageType type = 1;
 
-	bytes cmd = 2;
+	Record record = 2;
 
-	bytes result = 3;
-
+	Result result = 3;
 
 }
