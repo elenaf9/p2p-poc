@@ -1,4 +1,4 @@
-use crate::dht_proto as proto;
+use crate::structs_proto as proto;
 use async_trait::async_trait;
 use futures::{prelude::*, AsyncRead, AsyncWrite};
 use libp2p::{
@@ -26,6 +26,7 @@ pub enum MailboxRequest {
 pub struct MailboxRecord {
     pub(crate) key: String,
     pub(crate) value: String,
+    pub(crate) timeout_sec: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +138,7 @@ fn proto_msg_to_req(msg: proto::Message) -> Result<MailboxRequest, io::Error> {
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
                 value: String::from_utf8(proto_record.value)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                timeout_sec: proto_record.timeout,
             };
             Ok(MailboxRequest::Publish(record))
         }
@@ -171,6 +173,7 @@ fn req_to_proto_msg(req: MailboxRequest) -> proto::Message {
             let proto_record = proto::Record {
                 key: record.key.into_bytes(),
                 value: record.value.into_bytes(),
+                timeout: record.timeout_sec,
             };
             proto::Message {
                 r#type: proto::message::MessageType::Publish as i32,

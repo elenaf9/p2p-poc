@@ -1,9 +1,10 @@
 syntax = "proto3";
-package dht.pb;
+package structs.pb;
 
 message Record {
 	bytes key = 1;
 	bytes value = 2;
+	fixed64 timeout = 3;
 }
 
 message Message {
