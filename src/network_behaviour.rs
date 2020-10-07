@@ -121,14 +121,19 @@ impl P2PNetworkBehaviour {
             }
             PubReq(r) => {
                 println!(
-                    "Received Request to publish for id: {:?} the value: {:?}",
+                    "Received Request to publish for key: {:?} the value: {:?}",
                     r.key, r.value
                 );
+                let duration = if r.timeout_sec > 0 {
+                    r.timeout_sec
+                } else {
+                    9000u64
+                };
                 let record = Record {
                     key: Key::new(&r.key),
                     value: r.value.into_bytes(),
                     publisher: None,
-                    expires: Some(Instant::now() + Duration::new(120, 0)),
+                    expires: Some(Instant::now() + Duration::new(duration, 0)),
                 };
                 let put_record = self.kademlia.put_record(record, Quorum::One);
                 if put_record.is_ok() {

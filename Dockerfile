@@ -9,7 +9,7 @@ WORKDIR /iota-p2p-poc
 # COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
 COPY ./build.rs ./build.rs
-COPY ./src/dht.proto ./src/dht.proto
+COPY ./src/structs.proto ./src/structs.proto
 
 # cache dependencies
 RUN cargo build --release
