@@ -149,12 +149,10 @@ fn poll_input(
                         listening = true;
                         println!("Type LIST to view current bucket entries");
                         println!("Type PING <peer_id> to ping another peer");
-                        println!("Type GET <key> to fetch a record");
                         if mailbox_peer.is_ok() {
-                            println!("Type PUT <key> <value> <peer_id:OPTIONAL> to let another peer publish a record, if no peer_id it will use the mailbox peer_id");
-                        } else {
-                            println!("Type PUT <key> <value> <peer_id> to let another peer publish a record");
-                        }
+                            println!("Type GET <key> to fetch a record");
+                            println!("Type PUT <key> <value> to put a record into the mailbox");
+                        } 
                     }
                     break;
                 }
@@ -206,29 +204,20 @@ fn publish_record(
     mailbox_peer: &Result<PeerId, ()>,
 ) {
     if let Some(key) = args.next() {
-        if let Some(value) = args.next() {
+        let mut value: String = args.map(|s| String::from(s) + " ").collect();
+        if value.pop().is_some() {
             let record = MailboxRecord {
                 key: String::from(key),
-                value: String::from(value),
+                value: value.clone(),
             };
-            if let Some(peer_id) = args.next() {
-                if let Ok(peer) = PeerId::from_str(peer_id) {
-                    println!(
-                        "Sending publish request for record {:?}:{:?} to peer: {:?}",
-                        key, value, peer
-                    );
-                    msg_proto.send_request(&peer, MailboxRequest::Publish(record));
-                } else {
-                    println!("Faulty target peer id");
-                }
-            } else if let Ok(peer) = mailbox_peer {
+             if let Ok(peer) = mailbox_peer {
                 println!(
                     "Sending publish request for record {:?}:{:?} to peer: {:?}",
                     key, value, peer
                 );
                 msg_proto.send_request(&peer, MailboxRequest::Publish(record));
             } else {
-                println!("Missing target peer");
+                println!("Missing mailbox peer");
             }
         } else {
             println!("Missing value");
