@@ -211,7 +211,7 @@ fn publish_record(
     msg_proto: &mut RequestResponse<MailboxCodec>,
     mailbox_peer: Option<&PeerId>,
 ) {
-    if let Some(cap) = Regex::new("PUT\\s+\"(\\w+)\"\\s*\"(.+)\"\\s*(\\d+)?")
+    if let Some(cap) = Regex::new("PUT\\s+\"([\\w\\-_\\.]+)\"\\s*\"(.+)\"\\s*(\\d+)?")
         .ok()
         .and_then(|regex| regex.captures(&line))
     {
@@ -241,7 +241,7 @@ fn publish_record(
 }
 
 fn fetch_record(line: String, kademlia: &mut Kademlia<MemoryStore>) {
-    if let Some(key_match) = Regex::new("GET\\s+\"(\\w+)\"")
+    if let Some(key_match) = Regex::new("GET\\s+\"([\\w\\-_\\.]+)\"")
         .ok()
         .and_then(|regex| regex.captures(&line))
         .and_then(|cap| cap.get(1))
