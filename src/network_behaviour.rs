@@ -120,10 +120,6 @@ impl P2PNetworkBehaviour {
                 self.msg_proto.send_response(channel, Pong);
             }
             PubReq(r) => {
-                println!(
-                    "Received Request to publish for key: {:?} the value: {:?}",
-                    r.key, r.value
-                );
                 let duration = if r.timeout_sec > 0 {
                     r.timeout_sec
                 } else {
