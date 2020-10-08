@@ -97,21 +97,21 @@ fn attempt_connect_mailbox(swarm: &mut P2PNetworkSwarm) -> Option<PeerId> {
                 .and_then(|addr_arg| Multiaddr::from_str(&*addr_arg).ok())
                 .and_then(|addr| Swarm::dial_addr(swarm, addr.clone()).ok().map(|_| addr))
             {
-                println!("Dialed Mailbox{}", addr);
+                println!("Dialed mailbox{}.", addr);
                 if let Some(peer_id) = std::env::args()
                     .nth(index + 2)
                     .and_then(|peer_arg| PeerId::from_str(&*peer_arg).ok())
                 {
                     swarm.kademlia.add_address(&peer_id, addr);
                     if swarm.kademlia.bootstrap().is_ok() {
-                        println!("Successful bootstrapping");
+                        println!("Successful bootstrapping.");
                     } else {
-                        eprintln!("Could not bootstrap");
+                        eprintln!("Could not bootstrap.");
                     }
                     return Some(peer_id);
                 }
             } else {
-                eprintln!("Missing or invalid remote multiaddress");
+                eprintln!("Missing or invalid remote multi-address.");
             }
             None
         })
@@ -184,10 +184,10 @@ fn handle_input_line(swarm: &mut P2PNetworkSwarm, line: String, mailbox_peer: Op
                     }
                 }
             }
-            _ => eprintln!("Invalid command"),
+            _ => eprintln!("Invalid command."),
         }
     } else {
-        eprintln!("Invalid command");
+        eprintln!("Invalid command.");
     }
 }
 
@@ -202,7 +202,7 @@ fn send_ping_to_peer(line: String, msg_proto: &mut RequestResponse<MailboxCodec>
         println!("Sending Ping to peer {:?}", peer_id);
         msg_proto.send_request(&peer_id, ping);
     } else {
-        eprintln!("Missing or invalid target peer id");
+        eprintln!("Missing or invalid target peer id.");
     }
 }
 
@@ -233,10 +233,10 @@ fn publish_record(
             );
             msg_proto.send_request(peer, MailboxRequest::Publish(record));
         } else {
-            eprintln!("Missing mailbox peer");
+            eprintln!("Missing mailbox peer.");
         }
     } else {
-        eprintln!("Missing or invalid Input");
+        eprintln!("Missing or invalid input.");
     }
 }
 
@@ -249,6 +249,6 @@ fn fetch_record(line: String, kademlia: &mut Kademlia<MemoryStore>) {
         let key = Key::new(&key_match.as_str());
         kademlia.get_record(&key, Quorum::One);
     } else {
-        eprintln!("Missing key");
+        eprintln!("Missing key.");
     }
 }

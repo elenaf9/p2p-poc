@@ -56,14 +56,14 @@ impl NetworkBehaviourEventProcess<KademliaEvent> for P2PNetworkBehaviour {
                     } in ok.records
                     {
                         println!(
-                            "Got record {:?} {:?}",
+                            "Got record {:?} {:?}.",
                             std::str::from_utf8(key.as_ref()).unwrap(),
                             std::str::from_utf8(&value).unwrap(),
                         );
                     }
                 }
                 QueryResult::GetRecord(Err(err)) => {
-                    eprintln!("Failed to get record: {:?}", err);
+                    eprintln!("Failed to get record: {:?}.", err);
                 }
                 _ => {}
             }
@@ -93,7 +93,7 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent<MailboxRequest, MailboxRe
                 request_id,
                 error,
             } => println!(
-                "Outbound Failure for request {:?} to peer: {:?}: {:?}",
+                "Outbound Failure for request {:?} to peer: {:?}: {:?}.",
                 request_id, peer, error
             ),
             InboundFailure {
@@ -101,7 +101,7 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent<MailboxRequest, MailboxRe
                 request_id,
                 error,
             } => println!(
-                "Inbound Failure for request {:?} to peer: {:?}: {:?}",
+                "Inbound Failure for request {:?} to peer: {:?}: {:?}.",
                 request_id, peer, error
             ),
         }
@@ -116,7 +116,7 @@ impl P2PNetworkBehaviour {
     ) {
         match request {
             Ping => {
-                println!("Received Ping, we will send a Pong back");
+                println!("Received Ping, we will send a Pong back.");
                 self.msg_proto.send_response(channel, Pong);
             }
             PubReq(r) => {
@@ -133,7 +133,7 @@ impl P2PNetworkBehaviour {
                 };
                 let put_record = self.kademlia.put_record(record, Quorum::One);
                 if put_record.is_ok() {
-                    println!("Successfully stored record");
+                    println!("Successfully stored record.");
                     self.msg_proto
                         .send_response(channel, PubRes(MailboxResult::Success));
                 } else {
@@ -146,11 +146,11 @@ impl P2PNetworkBehaviour {
     fn handle_response_msg(&mut self, request_id: RequestId, response: MailboxResponse) {
         match response {
             Pong => {
-                println!("Received Pong for request {:?}", request_id);
+                println!("Received Pong for request {:?}.", request_id);
             }
             PubRes(result) => {
                 println!(
-                    "Received Result for publish request {:?}: {:?}",
+                    "Received Result for publish request {:?}: {:?}.",
                     request_id, result
                 );
             }
