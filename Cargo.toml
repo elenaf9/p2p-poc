@@ -1,5 +1,5 @@
 [package]
-name = "iota-p2p-poc"
+name = "p2p-poc"
 version = "0.1.0"
 authors = ["Elena Frank <elena.frank@iota.org>"]
 edition = "2018"
