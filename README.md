@@ -3,7 +3,7 @@
 Basic Mailbox that enables different peers to communicate with each other.
 In order to provide a message / record for a remote peer, a local peer adds this information to a key-value-store mailbox that runs on a server. The mailbox publishes this record in their kademlia DHT, from which the remote peer can then read the value if they know the key.
 
-**This was only the PoC to start digging into the concepts and protocols of libp2p. Any further development and the library-version of this exists within [iotaledger/stronghold.rs](https://github.com/iotaledger/stronghold.rs/tree/feat-p2p)**
+**This was only the PoC to start digging into the concepts and protocols of libp2p. Any further development and the library-version of this exists within [elenaf9/p2p](https://github.com/elenaf9/p2p)**.
 
 ## Getting started
 
